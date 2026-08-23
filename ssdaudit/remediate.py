@@ -65,6 +65,7 @@ def write_copy_script(
     direction: str,
     log_name: str,
     already_present: dict[str, list[str]] | None = None,
+    dupes_checked: bool = True,
 ) -> Path:
     """Emit robocopy commands that fill gaps from *source_root* into *dest_root*.
 
@@ -90,7 +91,14 @@ def write_copy_script(
             f"{len(records)} files, {format_bytes(total_bytes)}",
         ]
         + ([f"{len(skipped)} file(s) held back - already on the destination under another name"]
-           if skipped else []),
+           if skipped else [])
+        + ([] if dupes_checked else [
+            "",
+            "WARNING: duplicate detection was skipped for this audit.",
+            "A file you merely MOVED cannot be told apart from one that is",
+            "missing, so this script may copy files the destination already",
+            "holds under a different name. Re-run without --no-dupes to check.",
+        ]),
     )
 
     if skipped:
@@ -278,21 +286,28 @@ def _relocated(dupes: DupeResult, side: str) -> dict[str, list[str]]:
     return mapping
 
 
-def write_all(result: CompareResult, dupes: DupeResult, directory: Path) -> list[Path]:
-    """Generate every remediation artefact for one audit run."""
+def write_all(result: CompareResult, dupes: DupeResult | None, directory: Path) -> list[Path]:
+    """Generate every remediation artefact for one audit run.
+
+    *dupes* is None when duplicate detection was skipped (``--no-dupes``). The
+    scripts are still generated -- they just cannot hold back moved files,
+    because nothing has established which files merely moved.
+    """
     directory.mkdir(parents=True, exist_ok=True)
+    dupes_checked = dupes is not None
+    dupes = dupes or DupeResult()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     written = [
         write_copy_script(
             result.only_left, result.left.root, result.right.root,
             directory / "sync-left-to-right.cmd", "LEFT -> RIGHT", f"copy-l2r-{stamp}.log",
-            already_present=_relocated(dupes, "left"),
+            already_present=_relocated(dupes, "left"), dupes_checked=dupes_checked,
         ),
         write_copy_script(
             result.only_right, result.right.root, result.left.root,
             directory / "sync-right-to-left.cmd", "RIGHT -> LEFT", f"copy-r2l-{stamp}.log",
-            already_present=_relocated(dupes, "right"),
+            already_present=_relocated(dupes, "right"), dupes_checked=dupes_checked,
         ),
         write_duplicate_script(dupes, result.left.root, result.right.root,
                                directory / "review-duplicates.cmd"),

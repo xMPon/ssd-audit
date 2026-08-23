@@ -43,6 +43,12 @@ class Volume:
     label: str
     fs_type: str
     drive_type: str
+    total_bytes: int = 0
+    free_bytes: int = 0
+
+    @property
+    def used_bytes(self) -> int:
+        return max(0, self.total_bytes - self.free_bytes)
 
     @property
     def is_external(self) -> bool:
@@ -92,13 +98,41 @@ def _query_windows_volume(root: str) -> Volume | None:
     if not ok:
         return None
 
+    total, free = _capacity(kernel32, root)
+
     return Volume(
         mount=root,
         serial=_format_serial(serial.value),
         label=label_buf.value,
         fs_type=fs_buf.value,
         drive_type=drive_type,
+        total_bytes=total,
+        free_bytes=free,
     )
+
+
+def _capacity(kernel32, root: str) -> tuple[int, int]:
+    """Total and free bytes, so a picker can show which drive is which.
+
+    Capacity is often the only thing distinguishing two similar drives at a
+    glance, which matters when choosing what to audit.
+    """
+    free_to_caller = ctypes.c_ulonglong(0)
+    total = ctypes.c_ulonglong(0)
+    total_free = ctypes.c_ulonglong(0)
+
+    previous_mode = kernel32.SetErrorMode(_SEM_FAILCRITICALERRORS)
+    try:
+        ok = kernel32.GetDiskFreeSpaceExW(
+            wintypes.LPCWSTR(root),
+            ctypes.byref(free_to_caller),
+            ctypes.byref(total),
+            ctypes.byref(total_free),
+        )
+    finally:
+        kernel32.SetErrorMode(previous_mode)
+
+    return (total.value, total_free.value) if ok else (0, 0)
 
 
 def _posix_volume(path: str) -> Volume | None:

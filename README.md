@@ -30,27 +30,41 @@ cd ssd-audit
 pip install -e .
 ```
 
-## Use
+## Use it
+
+**Double-click `SSD Audit.cmd`.** A window opens listing every attached drive
+with its label, format and capacity. Pick one on each side, choose how
+thoroughly to check, press Start.
+
+Nothing is selected for you. The Start button stays disabled until you've
+deliberately chosen both sides, because auditing the wrong pair is the mistake
+that costs you a long scan.
+
+While it runs you can see which drive is being read, how many files have been
+found, and how far the hashing has got. When it finishes, buttons take you
+straight to the report or the audit folder.
+
+Want a single file you can carry on the SSD itself and run on a machine with no
+Python? Double-click `build-exe.cmd` once to produce `dist\SSD Audit.exe`.
+
+### Terminal
+
+Same wizard, no window:
 
 ```bash
-# What's attached, and what are the serial numbers?
-ssdaudit volumes
+ssdaudit run
+```
 
-# Compare two drives
-ssdaudit compare --left E:\ --right F:\
+Or drive it directly:
 
-# Compare one folder rather than the whole drive
-ssdaudit compare --left E:\ --right F:\ --folder Photos
-
-# Pick folders interactively, then save the selection as a profile
-ssdaudit pick --left E:\ --right F:\
-
-# Re-run a saved profile
-ssdaudit compare --profile photos
-
-# What changed since the previous audit?
-ssdaudit history
-ssdaudit compare-runs -2 latest
+```bash
+ssdaudit volumes                                    # attached drives + serials
+ssdaudit compare --left E:\ --right F:\             # compare two drives
+ssdaudit compare --left E:\ --right F:\ --folder Photos   # one folder only
+ssdaudit pick --left E:\ --right F:\                # pick folders, save a profile
+ssdaudit compare --profile photos                   # re-run a saved profile
+ssdaudit history                                    # every past audit
+ssdaudit compare-runs -2 latest                     # what changed since last time
 ```
 
 Exit codes: `0` drives match · `1` differences found · `2` the audit couldn't run.

@@ -123,3 +123,30 @@ class TestCopyScripts:
                                  tmp_path / "copy.cmd", "TEST", "test.log")
 
         assert "50%%_off.txt" in path.read_text(encoding="utf-8")
+
+
+class TestSkippedDuplicateDetection:
+    def test_no_dupes_still_produces_scripts(self, trees, index, tmp_path):
+        """--no-dupes passes None; the run must still complete."""
+        left, right = trees
+        result = compare(scan(str(left)), scan(str(right)), index, verify="smart")
+
+        written = write_all(result, None, tmp_path / "run")
+        assert {"sync-left-to-right.cmd", "conflicts.txt"} <= {p.name for p in written}
+
+    def test_no_dupes_warns_that_moved_files_cannot_be_detected(self, trees, index, tmp_path):
+        """Without the cross-drive check the script may duplicate a moved file."""
+        left, right = trees
+        result = compare(scan(str(left)), scan(str(right)), index, verify="smart")
+        write_all(result, None, tmp_path / "run")
+
+        text = (tmp_path / "run" / "sync-left-to-right.cmd").read_text(encoding="utf-8")
+        assert "duplicate detection was skipped" in text
+
+    def test_normal_runs_carry_no_such_warning(self, trees, index, tmp_path):
+        left, right = trees
+        result, dupes = build(left, right, index)
+        write_all(result, dupes, tmp_path / "run")
+
+        text = (tmp_path / "run" / "sync-left-to-right.cmd").read_text(encoding="utf-8")
+        assert "duplicate detection was skipped" not in text

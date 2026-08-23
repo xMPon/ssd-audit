@@ -40,11 +40,13 @@ from .history import (
 )
 from .index import HashIndex, default_cache_path
 from .picker import choose_folders
+from .progress import HashReporter, Progress, ScanReporter
 from .remediate import write_all
 from .report import format_bytes, new_run_id, write_audit
 from .resolver import DEFAULT_WORKERS
 from .scanner import scan
 from .volumes import find_by_serial, list_volumes, volume_for_path
+from .wizard import run_wizard, volume_table
 
 EXIT_IN_SYNC = 0
 EXIT_DIFFERENCES = 1
@@ -138,53 +140,120 @@ def cmd_volumes(args) -> int:
         print("No volumes could be identified on this platform.")
         return EXIT_ERROR
 
-    print("\nAttached volumes:\n")
-    for volume in volumes:
-        print(f"  {volume.describe()}")
+    print("\n  Attached drives")
+    volume_table(volumes)
     print(
-        "\nProfiles record the serial, not the letter, so a drive stays "
-        "identified after Windows remounts it elsewhere.\n"
+        "\n  Drives are matched by serial number, not by letter, so a saved profile\n"
+        "  keeps working after Windows remounts a drive somewhere else.\n"
+        "\n  Compare two of these with:  ssdaudit run\n"
     )
     return EXIT_IN_SYNC
 
 
+def cmd_gui(args) -> int:
+    """Open the desktop window."""
+    try:
+        from .gui import main as gui_main
+    except ImportError as error:
+        raise AuditError(
+            f"the desktop interface needs tkinter, which this Python lacks ({error}).\n"
+            "  Use the terminal wizard instead:  ssdaudit run"
+        )
+    return gui_main()
+
+
+def cmd_run(args) -> int:
+    """Interactive setup, then the comparison it describes."""
+    rules = rules_from(args, None)
+    try:
+        plan = run_wizard(rules)
+    except KeyboardInterrupt:
+        print("\n  Cancelled. Nothing was read.\n")
+        return EXIT_ERROR
+    except RuntimeError as error:
+        raise AuditError(str(error))
+
+    if plan is None:
+        return EXIT_ERROR
+
+    return execute_comparison(
+        left_root=plan["left"],
+        right_root=plan["right"],
+        rules=rules,
+        folders=plan["folders"],
+        verify=plan["verify"],
+        want_dupes=plan["dupes"],
+        args=args,
+        profile=None,
+        name="interactive",
+    )
+
+
 def cmd_compare(args) -> int:
     left_root, right_root, profile = sides_from_args(args)
-    rules = rules_from(args, profile)
-    folders = args.folder or (profile.folders if profile else [])
-    verify = args.verify or (profile.verify if profile else "smart")
-    name = args.profile or "ad-hoc"
+    return execute_comparison(
+        left_root=left_root,
+        right_root=right_root,
+        rules=rules_from(args, profile),
+        folders=args.folder or (profile.folders if profile else []),
+        verify=args.verify or (profile.verify if profile else "smart"),
+        want_dupes=not args.no_dupes,
+        args=args,
+        profile=profile,
+        name=args.profile or "ad-hoc",
+    )
 
+
+def execute_comparison(
+    left_root: str,
+    right_root: str,
+    rules,
+    folders: list[str],
+    verify: str,
+    want_dupes: bool,
+    args,
+    profile: Profile | None,
+    name: str,
+) -> int:
+    """Run one audit, reporting progress throughout.
+
+    Every phase reports as it goes: a whole-drive scan can run for minutes, and
+    silence is indistinguishable from a hang.
+    """
     started = time.time()
     started_iso = datetime.now().isoformat(timespec="seconds")
+    quiet = getattr(args, "quiet", False)
 
-    print(f"\n  Left  {left_root}")
-    print(f"  Right {right_root}")
-    print(f"  Scope {', '.join(folders) if folders else 'entire drive'}")
-    print(f"  Verify: {verify}\n")
+    print(f"\n  {'LEFT':<6} {left_root}")
+    print(f"  {'RIGHT':<6} {right_root}")
+    print(f"  {'Scope':<6} {', '.join(folders) if folders else 'entire drive'}")
+    print(f"  {'Verify':<6} {verify}")
+    print("\n  Reading both drives. Nothing will be modified.\n")
 
-    print("  Scanning left…", end="", flush=True)
-    left = scan(left_root, rules, folders)
-    print(f" {len(left.files):,} files")
+    progress = Progress(enabled=False if quiet else None)
 
-    print("  Scanning right…", end="", flush=True)
-    right = scan(right_root, rules, folders)
-    print(f" {len(right.files):,} files")
+    left = scan(left_root, rules, folders, ScanReporter(progress, "Scanning left"))
+    progress.finish(f"  Scanned left:  {len(left.files):>9,} files "
+                    f"in {left.dirs_scanned:,} folders")
+
+    right = scan(right_root, rules, folders, ScanReporter(progress, "Scanning right"))
+    progress.finish(f"  Scanned right: {len(right.files):>9,} files "
+                    f"in {right.dirs_scanned:,} folders")
 
     cache_path = Path(args.cache) if args.cache else default_cache_path()
     with HashIndex(cache_path) as index:
-        print("  Comparing…", end="", flush=True)
-        result = compare(left, right, index, verify=verify, workers=args.workers)
-        print(" done")
+        result = compare(left, right, index, verify=verify, workers=args.workers,
+                         on_progress=HashReporter(progress, "Verifying contents"))
+        progress.finish("  Compared:      done")
 
         duplicates = None
-        if not args.no_dupes:
-            print("  Looking for duplicates…", end="", flush=True)
+        if want_dupes:
             duplicates = find_duplicates(
                 left, right, index,
                 scope=args.dupe_scope, min_size=args.min_size, workers=args.workers,
+                on_progress=HashReporter(progress, "Hashing for duplicates"),
             )
-            print(" done")
+            progress.finish("  Duplicates:    done")
 
         cache_stats = index.stats()
 
@@ -237,7 +306,7 @@ def _print_verdict(result, duplicates, directory: Path, duration: float, cache: 
     if counts["dst_artifacts"]:
         print(f"  {counts['dst_artifacts']:,} timestamp-only differences (DST artefact, content identical)")
     if counts["unverified"]:
-        print(f"  {counts['unverified']:,} unverified — rerun with --verify smart to settle")
+        print(f"  {counts['unverified']:,} unverified - rerun with --verify smart to settle")
     if counts["cruft_files"]:
         print(f"  {counts['cruft_files']:,} cruft files ({format_bytes(counts['bytes_cruft'])} reclaimable)")
 
@@ -252,7 +321,7 @@ def _print_verdict(result, duplicates, directory: Path, duration: float, cache: 
 
     errors = counts["scan_errors"] + len(result.hash_errors)
     if errors:
-        print(f"  {errors:,} files or folders could not be read — see diff.json")
+        print(f"  {errors:,} files or folders could not be read - see diff.json")
 
     print("  " + "=" * 60)
     print(f"  Finished in {duration:.1f}s "
@@ -271,16 +340,16 @@ def cmd_dupes(args) -> int:
     rules = rules_from(args, profile)
     folders = args.folder or (profile.folders if profile else [])
 
-    print(f"\n  Scanning {left_root}…", end="", flush=True)
+    print(f"\n  Scanning {left_root}...", end="", flush=True)
     left = scan(left_root, rules, folders)
     print(f" {len(left.files):,} files")
-    print(f"  Scanning {right_root}…", end="", flush=True)
+    print(f"  Scanning {right_root}...", end="", flush=True)
     right = scan(right_root, rules, folders)
     print(f" {len(right.files):,} files")
 
     cache_path = Path(args.cache) if args.cache else default_cache_path()
     with HashIndex(cache_path) as index:
-        print("  Hashing candidates…", end="", flush=True)
+        print("  Hashing candidates...", end="", flush=True)
         duplicates = find_duplicates(
             left, right, index, scope=args.dupe_scope,
             min_size=args.min_size, workers=args.workers,
@@ -295,13 +364,13 @@ def cmd_dupes(args) -> int:
         if not groups:
             continue
         total = sum(group.wasted_bytes for group in groups)
-        print(f"  {title} — {len(groups):,} groups, {format_bytes(total)} reclaimable")
+        print(f"  {title} - {len(groups):,} groups, {format_bytes(total)} reclaimable")
         for group in groups[:20]:
             print(f"    {format_bytes(group.size)} x{len(group.entries)}")
             for path in group.paths():
                 print(f"      {path}")
         if len(groups) > 20:
-            print(f"    … and {len(groups) - 20:,} more groups")
+            print(f"    ... and {len(groups) - 20:,} more groups")
         print()
 
     if not (duplicates.within_left or duplicates.within_right or duplicates.cross):
@@ -323,7 +392,7 @@ def cmd_pick(args) -> int:
     folders = choose_folders(left_root, rules, preselected=profile.folders if profile else None)
 
     if not folders:
-        print("\n  No folders selected — the whole drive would be compared.")
+        print("\n  No folders selected - the whole drive would be compared.")
     else:
         print(f"\n  Selected {len(folders)} folder(s):")
         for folder in folders:
@@ -431,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ssdaudit",
         description="Compare two drives: find what is missing, conflicting or duplicated. "
-                    "Read-only — it never modifies either drive.",
+                    "Read-only - it never modifies either drive.",
     )
     parser.add_argument("--version", action="version", version=f"ssdaudit {__version__}")
     subparsers = parser.add_subparsers(dest="command")
@@ -456,10 +525,25 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--min-size", type=int, default=DEFAULT_MIN_SIZE,
                          help=f"ignore files below this size (default {DEFAULT_MIN_SIZE})")
 
-    subparsers.add_parser("volumes", help="list attached volumes and their serials")
+    subparsers.add_parser("gui", help="open the desktop window (start here)")
+    subparsers.add_parser("volumes", help="list attached drives and their serials")
+
+    run_parser = subparsers.add_parser(
+        "run", help="choose drives interactively, then audit them (start here)")
+    add_dupe_options(run_parser)
+    run_parser.add_argument("--preset", action="append", choices=["dev"],
+                            help="add an ignore preset")
+    run_parser.add_argument("--exclude", action="append", help="glob to exclude (repeatable)")
+    run_parser.add_argument("--include", action="append", help="glob to include exclusively")
+    run_parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                            help=f"parallel hashing threads (default {DEFAULT_WORKERS})")
+    run_parser.add_argument("--cache", help="override the hash cache location")
+    run_parser.add_argument("--out", help="directory to write audit runs into")
+    run_parser.add_argument("--quiet", action="store_true",
+                            help="suppress the live progress line")
 
     compare_parser = subparsers.add_parser(
-        "compare", help="audit two drives and write a report")
+        "compare", help="audit two drives non-interactively")
     add_selection(compare_parser)
     add_dupe_options(compare_parser)
     compare_parser.add_argument("--verify", choices=VERIFY_LEVELS,
@@ -469,6 +553,8 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--keep-cruft", action="store_true",
                                 help="compare Thumbs.db/.DS_Store instead of reporting them separately")
     compare_parser.add_argument("--out", help="directory to write audit runs into")
+    compare_parser.add_argument("--quiet", action="store_true",
+                                help="suppress the live progress line")
 
     dupes_parser = subparsers.add_parser("dupes", help="find duplicate files only")
     add_selection(dupes_parser)
@@ -499,7 +585,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 HANDLERS = {
+    "gui": cmd_gui,
     "volumes": cmd_volumes,
+    "run": cmd_run,
     "compare": cmd_compare,
     "dupes": cmd_dupes,
     "pick": cmd_pick,

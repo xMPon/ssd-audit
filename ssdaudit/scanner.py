@@ -106,8 +106,10 @@ def _walk(start_path: str, start_rel: str, rules: IgnoreRules, result: ScanResul
     while stack:
         current_path, current_rel = stack.pop()
         result.dirs_scanned += 1
-        if on_progress and result.dirs_scanned % 500 == 0:
-            on_progress(result)
+        # Reporting every directory would cost more than the walk itself on a
+        # tree of small folders; every 50 is frequent enough to look live.
+        if on_progress and result.dirs_scanned % 50 == 0:
+            on_progress(result, current_rel)
 
         try:
             entries = list(os.scandir(long_path(current_path)))
