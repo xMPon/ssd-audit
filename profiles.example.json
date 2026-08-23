@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Example only. Your real profiles live outside this repository, at",
+    "%LOCALAPPDATA%\\ssdaudit\\profiles.json, because they record drive labels",
+    "and folder paths. Create them with `ssdaudit pick` rather than by hand.",
+    "",
+    "Drives are identified by volume serial, never by letter -- run",
+    "`ssdaudit volumes` to see the serials of your attached drives. This is what",
+    "keeps a profile pointing at the right disk after Windows reassigns letters.",
+    "",
+    "`fallback_path` is only used when the serial cannot be resolved, e.g. when",
+    "comparing two folders on a single drive."
+  ],
+
+  "photos": {
+    "name": "photos",
+    "left": {
+      "serial": "1A2B-3C4D",
+      "label": "Archive SSD",
+      "subpath": "Photos",
+      "fallback_path": ""
+    },
+    "right": {
+      "serial": "5E6F-7A8B",
+      "label": "Backup SSD",
+      "subpath": "Photos",
+      "fallback_path": ""
+    },
+    "folders": [],
+    "presets": [],
+    "exclude": ["*.lrcat-journal"],
+    "include": [],
+    "verify": "smart"
+  },
+
+  "work-projects": {
+    "name": "work-projects",
+    "left": {
+      "serial": "1A2B-3C4D",
+      "label": "Archive SSD",
+      "subpath": "",
+      "fallback_path": ""
+    },
+    "right": {
+      "serial": "5E6F-7A8B",
+      "label": "Backup SSD",
+      "subpath": "",
+      "fallback_path": ""
+    },
+    "folders": ["Work/Clients", "Work/Contracts"],
+    "presets": ["dev"],
+    "exclude": [],
+    "include": [],
+    "verify": "smart"
+  }
+}

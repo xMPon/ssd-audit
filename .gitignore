@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Audit output. THIS REPOSITORY IS PUBLIC.
+#
+# Reports, manifests and generated scripts contain the full file and folder
+# names from the drives you audit. None of it may ever be committed. Runs are
+# written outside the repo by default (%LOCALAPPDATA%\ssdaudit\audits), but
+# these patterns catch the case where someone points --out at the working tree.
+# ---------------------------------------------------------------------------
+audits/
+.ssdaudit/
+manifest-*.jsonl
+diff.json
+summary.md
+report.html
+conflicts.txt
+sync-*.cmd
+review-*.cmd
+*.log
+
+# Saved profiles record drive labels, serials and folder paths.
+profiles.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssd-audit"
+version = "0.1.0"
+description = "Compare two drives: find missing files, content conflicts and duplicates. Read-only."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["backup", "duplicate-files", "file-comparison", "drive-audit", "exfat"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Utilities",
+]
+# No runtime dependencies, on purpose: the tool must run from a USB stick on a
+# machine with no network access.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+ssdaudit = "ssdaudit.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/xMPon/ssd-audit"
+Issues = "https://github.com/xMPon/ssd-audit/issues"
+
+[tool.setuptools.packages.find]
+include = ["ssdaudit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
